@@ -26,8 +26,72 @@ function extractPageForInspection() {
 }
 
 function fillFieldsInPage(fields) {
-  // fields: [{selector, field_type, value}]. Never clicks a submit button
-  // -- filling only, the human always does the actual submit.
+  // fields: [{selector, label, field_type, value}]. Never clicks submit.
+  // Now fallback-tolerant for Google Forms (div[role=textbox], entry.xxx).
+  function findEl(f) {
+    let el = null;
+    try { el = document.querySelector(f.selector); } catch {}
+    if (el) return el;
+    // Extract Google Forms entry id from any selector/label
+    const m = (f.selector && f.selector.match(/entry\.\d+/)) || null;
+    const entry = m ? m[0] : null;
+    if (entry) {
+      el = document.querySelector('[name="' + entry + '"]');
+      if (el) return el;
+      el = document.querySelector('textarea[name="' + entry + '"], input[name="' + entry + '"]');
+      if (el) return el;
+      // Google Forms often stores entry in data-params, actual input is inside listitem
+      const holder = document.querySelector('[data-params*="' + entry + '"]');
+      if (holder) {
+        const parent = holder.closest('[role="listitem"]') || holder.parentElement;
+        if (parent) {
+          const cand = parent.querySelector('input[type="text"], textarea, input[type="email"], div[role="textbox"], [contenteditable="true"]');
+          if (cand) return cand;
+        }
+      }
+    }
+    // Fallback by label text / aria-label (Google Forms shows label near listitem)
+    const labelLower = (f.label || "").toLowerCase().trim();
+    if (labelLower) {
+      const short = labelLower.slice(0, 14);
+      // try aria-label direct
+      for (const c of document.querySelectorAll('input, textarea, div[role="textbox"], [contenteditable="true"]')) {
+        const aria = (c.getAttribute('aria-label') || "").toLowerCase();
+        if (aria && (aria.includes(labelLower) || labelLower.includes(aria.slice(0, 10)))) return c;
+      }
+      // try listitem containing label
+      for (const item of document.querySelectorAll('[role="listitem"]')) {
+        const txt = (item.innerText || "").toLowerCase();
+        if (txt.includes(short)) {
+          const cand = item.querySelector('input, textarea, div[role="textbox"], [contenteditable="true"]');
+          if (cand) return cand;
+        }
+      }
+    }
+    return null;
+  }
+
+  function fillTextEl(el, value) {
+    el.focus && el.focus();
+    // Google Forms uses div[role=textbox] contenteditable
+    if (el.getAttribute('role') === 'textbox' || el.getAttribute('contenteditable') === 'true') {
+      el.textContent = value;
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, data: value }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      el.blur && el.blur();
+      return;
+    }
+    // Standard input/textarea
+    const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    if (setter) setter.call(el, value); else el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true }));
+    el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+    el.blur && el.blur();
+  }
+
   const results = [];
   for (const f of fields) {
     if (f.value === null || f.value === undefined || f.value === "") {
@@ -35,9 +99,9 @@ function fillFieldsInPage(fields) {
       continue;
     }
     try {
-      const el = document.querySelector(f.selector);
+      const el = findEl(f);
       if (!el) {
-        results.push({ label: f.label, ok: false, error: "selector not found: " + f.selector });
+        results.push({ label: f.label, ok: false, error: "selector not found: " + f.selector + " (tried entry/aria fallbacks)" });
         continue;
       }
       if (f.field_type === "checkbox") {
@@ -46,15 +110,17 @@ function fillFieldsInPage(fields) {
         const options = Array.from(el.options || []);
         const match = options.find((o) => o.value === f.value || o.text.trim() === String(f.value).trim());
         if (!match) {
+          // For Google Forms select is a div[role=listbox] — try clicking option text
+          const listbox = el.closest('[role="listitem"]') || document;
+          const opt = [...listbox.querySelectorAll('[role="option"]')].find(o => o.textContent.trim() === String(f.value).trim());
+          if (opt) { opt.click(); results.push({ label: f.label, ok: true }); continue; }
           results.push({ label: f.label, ok: false, error: "no matching option for " + f.value });
           continue;
         }
         el.value = match.value;
         el.dispatchEvent(new Event("change", { bubbles: true }));
       } else {
-        el.value = f.value;
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        el.dispatchEvent(new Event("change", { bubbles: true }));
+        fillTextEl(el, String(f.value));
       }
       results.push({ label: f.label, ok: true });
     } catch (e) {

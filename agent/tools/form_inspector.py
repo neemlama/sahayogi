@@ -85,6 +85,13 @@ Chrome extension and handed to you as text. Do not attempt to navigate \
 anywhere; just read the given HTML. Find the first <form> in it (or the \
 most prominent set of input fields if there's no explicit <form> tag).
 
+Special handling for Google Forms (docs.google.com/forms): the real \
+fields are inputs with name="entry.XXXXXXX" (often inside div[role=listitem]), \
+and the visible textbox may be div[role=textbox] or textarea. Always \
+return selector '[name="entry.XXXXXXX"]' for those (strongly preferred \
+over a generated id), and map the visible question text as label. For \
+selects, the options are div[role=option] text.
+
 {_FIELD_SCHEMA_INSTRUCTIONS}
 """
 
