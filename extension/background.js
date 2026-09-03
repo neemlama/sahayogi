@@ -52,16 +52,17 @@ function fillFieldsInPage(fields) {
       if (f.field_type !== 'select' || el.tagName === 'SELECT' || el.getAttribute('role') === 'radio' || el.getAttribute('role') === 'textbox') return el;
       if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.getAttribute('contenteditable') === 'true') return el;
     }
-    // Extract Google Forms entry id from any selector/label
-    const m = (f.selector && f.selector.match(/entry\.\d+/)) || null;
-    const entry = m ? m[0] : null;
-    if (entry) {
-      el = document.querySelector('[name="' + entry + '"]');
+    // Extract Google Forms entry id — data-params stores just the number without entry. prefix
+    const m = (f.selector && f.selector.match(/entry\.(\d+)/)) || null;
+    const entryFull = m ? m[0] : null;
+    const entryNum = m ? m[1] : null;
+    if (entryFull) {
+      el = document.querySelector('[name="' + entryFull + '"]');
       if (el && el.type !== 'hidden') return el;
-      el = document.querySelector('textarea[name="' + entry + '"], input[name="' + entry + '"]');
+      el = document.querySelector('textarea[name="' + entryFull + '"], input[name="' + entryFull + '"]');
       if (el) return el;
-      // Google Forms stores entry in data-params, actual widget is inside listitem
-      const holder = document.querySelector('[data-params*="' + entry + '"]');
+      // Google Forms stores numeric id in data-params (not entry.xxx)
+      const holder = entryNum ? document.querySelector('[data-params*="' + entryNum + '"]') : null;
       if (holder) {
         const parent = holder.closest('[role="listitem"]') || holder.parentElement;
         if (parent) {
@@ -138,13 +139,21 @@ function fillFieldsInPage(fields) {
         }
         // Google Forms radio: div[role=radio][data-value] inside same listitem
         const scope = el.closest('[role="listitem"]') || el.closest('[data-params]')?.closest('[role="listitem"]') || document;
-        // Try holder lookup for this entry
+        // Try holder lookup for this entry (numeric without entry. prefix for Google Forms)
         let holder = null;
-        if (f.selector && /entry\.\d+/.test(f.selector)) {
-          const eid = f.selector.match(/entry\.\d+/)[0];
-          holder = document.querySelector('[data-params*="' + eid + '"]');
+        if (f.selector && /entry\.(\d+)/.test(f.selector)) {
+          const num = f.selector.match(/entry\.(\d+)/)[1];
+          holder = document.querySelector('[data-params*="' + num + '"]');
         }
-        const searchRoot = holder ? (holder.closest('[role="listitem"]') || holder) : scope;
+        // fallback by label -> find listitem whose heading matches label
+        if (!holder) {
+          const lab = (f.label||"").trim();
+          if (lab) for (const li of document.querySelectorAll('[role="listitem"]')) {
+            const h = li.querySelector('[role="heading"]');
+            if (h && h.textContent.trim() === lab) { holder = li; break; }
+          }
+        }
+        const searchRoot = holder ? (holder.closest ? (holder.closest('[role="listitem"]')||holder) : holder) : scope;
         const norm = (s) => s.replace(/\s+/g,' ').trim().toLowerCase();
         const want = norm(targetVal);
         // radio
@@ -162,9 +171,9 @@ function fillFieldsInPage(fields) {
         // For Google Forms radio mistakenly typed as text, try radio path first
         if (f.field_type === "text" || f.field_type === "textarea") {
           let holder = null;
-          if (f.selector && /entry\.\d+/.test(f.selector)) {
-            const eid = f.selector.match(/entry\.\d+/)[0];
-            holder = document.querySelector('[data-params*="' + eid + '"]');
+          if (f.selector && /entry\.(\d+)/.test(f.selector)) {
+            const num = f.selector.match(/entry\.(\d+)/)[1];
+            holder = document.querySelector('[data-params*="' + num + '"]');
           }
           if (holder) {
             const li = holder.closest('[role="listitem"]');
