@@ -84,7 +84,23 @@ async function sendChat(message) {
     });
     const data = await res.json();
     thinking.remove();
-    addMessage(data.reply, "agent");
+    const replyDiv = addMessage(data.reply, "agent");
+    // If backend says session already decided, surface a clear hint to use New Conversation
+    if (/already resolved|already decided|create a new session|new session_id/i.test(data.reply)) {
+      const hint = document.createElement("div");
+      hint.className = "msg agent";
+      hint.style.background = "#fffbeb";
+      hint.style.border = "1px solid #fcd34d";
+      hint.style.fontSize = "13px";
+      hint.textContent = "Tip: Click 🔄 New Conversation (top-right) to start a fresh session — the old one is closed and cannot be reused (see agent/tools/proposal.py:74). Your vault profile is kept.";
+      messagesEl.appendChild(hint);
+    }
+    // If reply asks for missing required fields, highlight them in the input placeholder
+    const missingMatch = data.reply.match(/required fields[^\n:]*:\s*\[([^\]]+)\]/i) || data.reply.match(/missing[^:]*:\s*([^\n]+)/i);
+    if (missingMatch) {
+      inputEl.placeholder = "Missing: " + missingMatch[1].slice(0, 80) + " — type them and press Send";
+      inputEl.focus();
+    }
   } catch (err) {
     thinking.remove();
     addMessage("Something went wrong reaching FormBuddy: " + err, "agent");
@@ -108,9 +124,11 @@ function fieldRow(label, value) {
 function renderProposalBody(proposal) {
   const fieldRows = (proposal.fields || [])
     .map((f) => {
-      const value = f.value === null || f.value === undefined || f.value === "" ? "<em>(empty)</em>" : escapeHtml(String(f.value));
+      const empty = f.value === null || f.value === undefined || f.value === "";
+      const value = empty ? "<em>(empty)</em>" : escapeHtml(String(f.value));
       const reqTag = f.required ? ' <span style="color:#b45309;">*</span>' : "";
-      return `<tr><td>${escapeHtml(f.label)}${reqTag}</td><td>${value}</td></tr>`;
+      const rowStyle = empty && f.required ? ' style="background:#fffbeb;" title="Required — ask, don\'t invent"' : "";
+      return `<tr${rowStyle}><td>${escapeHtml(f.label)}${reqTag}</td><td>${value}</td></tr>`;
     })
     .join("");
 
