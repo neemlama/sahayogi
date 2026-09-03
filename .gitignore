@@ -19,13 +19,16 @@ cdk.out/
 infra/seed-data/audit-log.local.jsonl
 infra/seed-data/sessions.local/
 infra/seed-data/profile.local.json
-# Keep docs + selected screenshots for Devpost submission (judges need to see them)
+# Keep docs + curated screenshots for Devpost (not every local capture)
 !docs/
 !docs/*.png
 !docs/*.mmd
 !docs/*.md
 !screenshots/
 !screenshots/*.png
+# Ignore extra local captures — keep only the 4 curated ones already committed
+screenshots/screenshot_*.png
+screenshots/formbuddy_*.png
 
 # Personal drafts (not for public repo)
 docs/video-script.md
