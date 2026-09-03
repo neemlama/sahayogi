@@ -26,3 +26,9 @@ infra/seed-data/profile.local.json
 !docs/*.md
 !screenshots/
 !screenshots/*.png
+
+# Personal drafts (not for public repo)
+docs/video-script.md
+docs/builder-draft.md
+docs/checklist.md
+COST.md
