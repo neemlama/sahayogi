@@ -18,6 +18,31 @@ const PROFILE_KEY = "formbuddy_profile";
 function getProfile() { return localStorage.getItem(PROFILE_KEY) || ""; }
 function setProfile(v) { localStorage.setItem(PROFILE_KEY, v); }
 
+async function syncProfileFromServer() {
+  try {
+    const r = await fetch("/api/profile");
+    if (!r.ok) return;
+    const data = await r.json();
+    const prof = data.profile || {};
+    if (!Object.keys(prof).length) return;
+    const text = Object.entries(prof).map(([k,v])=>`${k}: ${v}`).join("\n");
+    if (!getProfile().trim()) { // only auto-fill vault if empty, don't overwrite user's vault
+      profileText.value = text;
+      setProfile(text);
+    }
+  } catch {}
+}
+async function pushProfileToServer() {
+  const raw = getProfile();
+  if (!raw.trim()) return;
+  const obj = {};
+  raw.split("\n").forEach(line=>{
+    const idx=line.indexOf(":");
+    if(idx>-1) obj[line.slice(0,idx).trim()] = line.slice(idx+1).trim();
+  });
+  try { await fetch("/api/profile",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({profile:obj})}); } catch {}
+}
+
 // profile vault UI
 const profileText = document.getElementById("profile-text");
 const profileBody = document.getElementById("profile-body");
@@ -31,13 +56,15 @@ if (profileToggle) profileToggle.addEventListener("click", () => {
   profileBody.hidden = !profileBody.hidden;
   profileToggleIcon.textContent = profileBody.hidden ? "▸" : "▾";
 });
-if (profileSaveBtn) profileSaveBtn.addEventListener("click", () => {
+if (profileSaveBtn) profileSaveBtn.addEventListener("click", async () => {
   setProfile(profileText.value);
+  await pushProfileToServer();
   profileSavedNote.hidden = false;
   setTimeout(() => profileSavedNote.hidden = true, 1500);
 });
-if (profileClearBtn) profileClearBtn.addEventListener("click", () => {
+if (profileClearBtn) profileClearBtn.addEventListener("click", async () => {
   profileText.value = ""; setProfile("");
+  try { await fetch("/api/profile",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({profile:{}})}); } catch {}
 });
 
 const messagesEl = document.getElementById("messages");
@@ -108,6 +135,7 @@ async function sendChat(message) {
     formEl.querySelector("button").disabled = false;
     refreshSession();
     refreshActivity();
+    syncProfileFromServer(); // pull cross-session memory saved via remember_user_details
   }
 }
 
@@ -257,8 +285,9 @@ document.getElementById("new-session-btn").addEventListener("click", () => {
 
 // Initial load: greet + sync any existing session state (e.g. after a page refresh).
 addMessage(
-  "Namaste! I'm FormBuddy (Good Neighbor). Give me a link to a ward letter, scholarship, or community form and I'll read the real form, draft exactly what I'd submit from your saved profile, and wait for your approval before anything is sent. For cooperatives: paste the form URL once, it helps everyone in the batch.",
+  "Namaste! I'm FormBuddy (Good Neighbor). Give me a link to a ward letter, scholarship, or community form and I'll read the real form, draft exactly what I'd submit from your saved profile, and wait for your approval before anything is sent. I ask one missing detail at a time like ChatGPT and remember it for next time. For cooperatives: paste the form URL once, it helps everyone in the batch.",
   "agent"
 );
 refreshSession();
 refreshActivity();
+syncProfileFromServer();
