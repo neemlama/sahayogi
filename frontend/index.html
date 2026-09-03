@@ -11,8 +11,8 @@
   <div class="brand">
     <span class="brand-mark">🙏</span>
     <div>
-      <h1>FormBuddy</h1>
-      <p>Fills out web forms for you — RSVPs, signups, applications — from a URL. Reads the real form, proposes exactly what it would submit, and only submits after you approve.</p>
+      <h1>FormBuddy — Good Neighbor</h1>
+      <p>Helps communities fill public-service forms — ward letters, scholarships, registrations. Reads the real form, drafts the exact plan from your saved profile &amp; document photos, and only submits after you approve.</p>
     </div>
     <button id="new-session-btn" class="btn-new-session" type="button" title="Start a fresh conversation with a new session">🔄 New Conversation</button>
   </div>
@@ -20,9 +20,21 @@
 
 <main class="layout">
   <section class="chat-panel">
+    <div id="profile-vault" class="profile-vault">
+      <button id="profile-toggle" class="profile-toggle" type="button">👤 Your Profile <span id="profile-toggle-icon">▸</span></button>
+      <div id="profile-body" hidden>
+        <p class="hint">Saved locally (localStorage) — included automatically when you send a message. Like the extension's chrome.storage.local vault.</p>
+        <textarea id="profile-text" rows="4" placeholder="e.g. Full name: Maya Gurung&#10;Email: maya@example.com&#10;Phone: 98XXXXXXXX&#10;Ward: Hetauda-4&#10;Campus: Hetauda City College, B.Sc. CSIT 6th sem"></textarea>
+        <div class="profile-actions">
+          <button id="profile-save" class="btn primary small" type="button">Save Profile</button>
+          <span id="profile-saved-note" class="hint" hidden>✅ Saved</span>
+          <button id="profile-clear" class="btn secondary small" type="button">Clear</button>
+        </div>
+      </div>
+    </div>
     <div id="messages" class="messages" aria-live="polite"></div>
     <form id="chat-form" class="chat-form">
-      <input id="chat-input" type="text" placeholder="Paste a form URL and tell me about yourself..." autocomplete="off" />
+      <input id="chat-input" type="text" placeholder="Paste a form URL and tell me about yourself (or just press Send to use saved profile)..." autocomplete="off" />
       <button type="submit">Send</button>
     </form>
   </section>

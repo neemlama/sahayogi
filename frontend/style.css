@@ -61,6 +61,33 @@ body {
   .layout { grid-template-columns: 1fr; }
 }
 
+.profile-vault {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background: #f8fafc;
+}
+.profile-toggle {
+  background: none;
+  border: none;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--teal-dark);
+  cursor: pointer;
+  padding: 0;
+}
+.profile-vault .hint { font-size: 11px; color: var(--text-muted); margin: 6px 0; line-height: 1.4; }
+.profile-vault textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+}
+.profile-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.btn.small { padding: 6px 10px; font-size: 12px; flex: none; }
+
 .chat-panel {
   background: var(--card);
   border: 1px solid var(--border);
