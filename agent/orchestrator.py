@@ -25,6 +25,7 @@ from strands import Agent
 from agent.tools.audit_log import log_decision
 from agent.tools.document_parser import document_parser
 from agent.tools.form_inspector import inspect_form, inspect_provided_html
+from agent.tools.profile_store import remember_user_details
 from agent.tools.proposal import propose_form_fill, resume_after_approval
 
 SYSTEM_PROMPT = """\
@@ -60,19 +61,32 @@ before asking them to retype details that are already in the photo. If \
 legible=false or fields are listed in low_confidence_fields, say so \
 plainly and ask the user to confirm rather than guessing.
 
+Memory & sequential questions (ChatGPT-like):
+- Whenever the user tells you a concrete fact about themselves (name, email, \
+phone, ward, address, etc.), immediately call remember_user_details with a \
+dict of what you learned — e.g. {"Full Name": "Maya Gurung", "Email": \
+"maya@example.com"}. This is durable cross-session memory; the next form \
+with a similarly-labelled field will auto-fill without asking again. Also \
+call it for answers to your own missing-field questions.
+- If the user corrects a saved value, call remember_user_details again — it \
+overwrites that key.
+
 Process whenever the user gives you a form to fill (URL or provided HTML):
 1. Call inspect_form or inspect_provided_html (per above) to discover the \
 form's actual fields. If ok=false (login wall, CAPTCHA, page didn't load, \
 no form found), tell the user plainly why you can't proceed — do not \
 invent fields for a form you couldn't actually read.
-2. For each discovered field, match it against what the user has told you \
-so far in this conversation. Use your judgment on label wording — a field \
-labeled "Full Name" matches "my name is...", a field labeled "Email \
-Address" matches an email the user gave you, etc. Leave "value" empty for \
-any field you don't have real data for.
-3. If any REQUIRED field has no value, ask the user for exactly those \
-fields — do not call propose_form_fill yet, and never fabricate a \
-plausible-looking value to fill the gap.
+2. For each discovered field, match it against (a) what the user has told you \
+so far in this conversation AND (b) the SAVED PROFILE block (if any) that \
+was injected into this prompt as "SAVED_PROFILE: ...". Use judgment on \
+label wording — "Full Name" matches "my name is...", etc. Leave "value" \
+empty for any field you don't have real data for.
+3. If any REQUIRED field has no value, ask the user for ONE missing field \
+at a time, conversationally (not a bullet list). Example: "I can fill \
+everything except your phone — what number should I use? I'll remember it \
+for next time." Do not call propose_form_fill yet, and never fabricate a \
+plausible-looking value. After the user answers, call \
+remember_user_details for that answer before re-trying.
 4. Call log_decision once to record the discovered fields and your draft \
 mapping (actor="agent", action="fields_matched").
 5. Once every required field has a real value, call propose_form_fill with \
@@ -82,7 +96,7 @@ just filling in "value"), the submit_selector, the correct fill_mode (see \
 above), and a clear summary_for_human describing exactly what you're about \
 to submit and why. This call will itself refuse and tell you what's \
 missing if you got the completeness check wrong — if that happens, go \
-back and ask the user, don't retry with a made-up value.
+back and ask ONE field at a time, don't retry with a made-up value.
 6. Present your findings to the user in your reply regardless: what form \
 you found, what you filled in and from where, what's still needed, and — \
 if you called propose_form_fill — that it's now awaiting their approval \
@@ -97,7 +111,7 @@ review — it does not submit anything either.
 def build_agent() -> Agent:
     return Agent(
         system_prompt=SYSTEM_PROMPT,
-        tools=[inspect_form, inspect_provided_html, log_decision, document_parser, propose_form_fill],
+        tools=[inspect_form, inspect_provided_html, log_decision, document_parser, propose_form_fill, remember_user_details],
     )
 
 

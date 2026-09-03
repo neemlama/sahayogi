@@ -25,14 +25,36 @@ async function resetSessionId() {
 let sessionId = null;
 let lastKnownFields = null; // the approved plan's fields, cached for the fill step
 
-// --- profile vault ---
+// --- profile vault (local + server cross-session memory) ---
 async function loadProfile() {
   const { formbuddy_profile } = await chrome.storage.local.get("formbuddy_profile");
   $("profile-text").value = formbuddy_profile || "";
+  // also pull server profile (saved via remember_user_details sequential Q&A) to keep in sync
+  try {
+    const r = await fetch(`${BACKEND_URL}/api/profile`);
+    if (r.ok) {
+      const data = await r.json();
+      const prof = data.profile || {};
+      if (Object.keys(prof).length && !formbuddy_profile?.trim()) {
+        const text = Object.entries(prof).map(([k,v])=>`${k}: ${v}`).join("\n");
+        $("profile-text").value = text;
+        await chrome.storage.local.set({ formbuddy_profile: text });
+      }
+    }
+  } catch {}
+}
+
+async function pushProfileToServer(text) {
+  if (!text.trim()) return;
+  const obj={};
+  text.split("\n").forEach(l=>{ const i=l.indexOf(":"); if(i>-1) obj[l.slice(0,i).trim()]=l.slice(i+1).trim(); });
+  try { await fetch(`${BACKEND_URL}/api/profile`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({profile:obj})}); } catch {}
 }
 
 $("profile-save").addEventListener("click", async () => {
-  await chrome.storage.local.set({ formbuddy_profile: $("profile-text").value });
+  const text=$("profile-text").value;
+  await chrome.storage.local.set({ formbuddy_profile: text });
+  await pushProfileToServer(text);
   $("profile-saved-note").hidden = false;
   setTimeout(() => ($("profile-saved-note").hidden = true), 1500);
 });

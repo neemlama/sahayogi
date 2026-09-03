@@ -1,0 +1,71 @@
+%% FormBuddy Architecture — Good Neighbor track
+%% Render with https://mermaid.live or `mmdc -i architecture.mmd -o architecture.png`
+flowchart TB
+    subgraph User[User / Community]
+        U1[Chat input\nURL + profile\n+ doc photo]
+        U2[Open tab with form\n+ side panel profile]
+        U3[Human approval\nApprove / Reject]
+    end
+
+    subgraph Frontend[Frontend Layer]
+        WEB[Web Chat UI\nfrontend/index.html\nfrontend/app.js\n+ local profile vault]
+        EXT[Chrome Extension\nsidepanel.html/.js\nbackground.js\nchrome.storage.local]
+    end
+
+    subgraph API[FastAPI Backend\napi/main.py]
+        CHAT["POST /api/chat\n(session_id, message,\npage_html?)"]
+        SESS["GET /api/session/{id}\nPOST /decide\nPOST /extension-result\nGET /audit"]
+        CORS[CORS * for extension]
+    end
+
+    subgraph Agent[Strands Orchestrator\nagent/orchestrator.py\nSonnet-class]
+        ORCH{Orchestrator Agent\nsystem_prompt}
+        INS1[inspect_form\nHaiku + AgentCore Browser\nform_inspector.py:130]
+        INS2[inspect_provided_html\nHaiku, no browser\nform_inspector.py:168]
+        DOC[document_parser\nBedrock vision\nHaiku/Sonnet\nform_inspector.py:104]
+        LOG[log_decision\naudit_log.py:54]
+        PROP[propose_form_fill\nproposal.py:46\nrefuses if required empty]
+        RESUME[resume_after_approval\nproposal.py:147]
+        EXTRES[record_extension_fill_result\nproposal.py:209]
+    end
+
+    subgraph Browser[Execution Layer]
+        ACB[AgentCore Browser\nfill_and_submit_form\nform_filler.py:87\nHaiku + browser tool]
+        DOM[Extension DOM fill\nbackground.js:28\nfillFieldsInPage\nno submit]
+    end
+
+    subgraph State[State & Audit\nDual-backend]
+        SESS_STORE[(Session Store\nsession_store.py\nlocal JSON / DynamoDB\nor AgentCore Memory)]
+        AUDIT[(Audit Log\n audit_log.py\nlocal JSONL / DynamoDB)]
+    end
+
+    U1 --> WEB --> CHAT
+    U2 --> EXT --> CHAT
+    CHAT --> ORCH
+    ORCH -->|URL only| INS1
+    ORCH -->|PAGE_HTML_PROVIDED| INS2
+    ORCH -->|image_path| DOC
+    ORCH --> LOG
+    ORCH --> PROP
+    PROP --> SESS_STORE
+    PROP --> LOG
+    LOG --> AUDIT
+    SESS_STORE --> SESS
+    AUDIT --> SESS
+
+    U3 --> SESS
+    SESS --> RESUME
+    RESUME -->|fill_mode=cloud| ACB
+    RESUME -->|fill_mode=extension| EXTRES
+    EXT -->|FILL_FIELDS| DOM
+    DOM -->|report| EXTRES
+    ACB --> SESS_STORE
+    ACB --> AUDIT
+    EXTRES --> SESS_STORE
+    EXTRES --> AUDIT
+
+    style ORCH fill:#0f766e,color:#fff
+    style PROP fill:#d97706,color:#fff
+    style RESUME fill:#be123c,color:#fff
+    style ACB fill:#1d4ed8,color:#fff
+    style DOM fill:#1d4ed8,color:#fff

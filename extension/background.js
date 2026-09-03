@@ -26,8 +26,95 @@ function extractPageForInspection() {
 }
 
 function fillFieldsInPage(fields) {
-  // fields: [{selector, field_type, value}]. Never clicks a submit button
-  // -- filling only, the human always does the actual submit.
+  // fields: [{selector, label, field_type, value}]. Never clicks submit.
+  // Now fallback-tolerant for Google Forms (div[role=textbox], entry.xxx).
+  function findEl(f) {
+    let el = null;
+    try { el = document.querySelector(f.selector); } catch {}
+    // If selector hits a sentinel hidden input, prefer the visible widget in same listitem
+    if (el && el.type === 'hidden' && el.name && el.name.includes('_sentinel')) {
+      const li = el.closest('[role="listitem"]');
+      if (li) {
+        const cand = li.querySelector('input[type="text"], textarea, div[role="textbox"], [contenteditable="true"], [role="radio"], [role="listbox"]');
+        if (cand) return cand;
+      }
+    }
+    if (el && !el.closest('[role="listitem"]')?.querySelector('[role="radio"]') !== null) {
+      // for radio fields the selector may point to hidden sentinel — handled below
+    }
+    if (el && el.getAttribute('role') !== 'radio' && el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA' && el.getAttribute('role') !== 'textbox') {
+      // keep el if it's viable, otherwise try fallbacks
+    }
+    if (el) {
+      // If it's a Google Forms radio container still, return it (select handling will find radio inside)
+      if (el.closest('[role="listitem"]') && el.closest('[role="listitem"]').querySelector('[role="radio"]') && f.field_type === 'select') return el;
+      // For text fields ensure we didn't land on wrong type
+      if (f.field_type !== 'select' || el.tagName === 'SELECT' || el.getAttribute('role') === 'radio' || el.getAttribute('role') === 'textbox') return el;
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.getAttribute('contenteditable') === 'true') return el;
+    }
+    // Extract Google Forms entry id — data-params stores just the number without entry. prefix
+    const m = (f.selector && f.selector.match(/entry\.(\d+)/)) || null;
+    const entryFull = m ? m[0] : null;
+    const entryNum = m ? m[1] : null;
+    if (entryFull) {
+      el = document.querySelector('[name="' + entryFull + '"]');
+      if (el && el.type !== 'hidden') return el;
+      el = document.querySelector('textarea[name="' + entryFull + '"], input[name="' + entryFull + '"]');
+      if (el) return el;
+      // Google Forms stores numeric id in data-params (not entry.xxx)
+      const holder = entryNum ? document.querySelector('[data-params*="' + entryNum + '"]') : null;
+      if (holder) {
+        const parent = holder.closest('[role="listitem"]') || holder.parentElement;
+        if (parent) {
+          if (f.field_type === 'select') return parent; // let select handler search radios inside
+          const cand = parent.querySelector('input[type="text"], textarea, input[type="email"], div[role="textbox"], [contenteditable="true"], [role="radio"]');
+          if (cand) return cand;
+          return parent;
+        }
+      }
+    }
+    // Fallback by label text / aria-label (Google Forms shows label near listitem)
+    const labelLower = (f.label || "").toLowerCase().trim();
+    if (labelLower) {
+      const short = labelLower.slice(0, 14);
+      // try aria-label direct
+      for (const c of document.querySelectorAll('input, textarea, div[role="textbox"], [contenteditable="true"]')) {
+        const aria = (c.getAttribute('aria-label') || "").toLowerCase();
+        if (aria && (aria.includes(labelLower) || labelLower.includes(aria.slice(0, 10)))) return c;
+      }
+      // try listitem containing label
+      for (const item of document.querySelectorAll('[role="listitem"]')) {
+        const txt = (item.innerText || "").toLowerCase();
+        if (txt.includes(short)) {
+          const cand = item.querySelector('input, textarea, div[role="textbox"], [contenteditable="true"]');
+          if (cand) return cand;
+        }
+      }
+    }
+    return null;
+  }
+
+  function fillTextEl(el, value) {
+    el.focus && el.focus();
+    // Google Forms uses div[role=textbox] contenteditable
+    if (el.getAttribute('role') === 'textbox' || el.getAttribute('contenteditable') === 'true') {
+      el.textContent = value;
+      el.dispatchEvent(new InputEvent('input', { bubbles: true, data: value }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      el.blur && el.blur();
+      return;
+    }
+    // Standard input/textarea
+    const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    if (setter) setter.call(el, value); else el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true }));
+    el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+    el.blur && el.blur();
+  }
+
   const results = [];
   for (const f of fields) {
     if (f.value === null || f.value === undefined || f.value === "") {
@@ -35,26 +122,71 @@ function fillFieldsInPage(fields) {
       continue;
     }
     try {
-      const el = document.querySelector(f.selector);
+      const el = findEl(f);
       if (!el) {
-        results.push({ label: f.label, ok: false, error: "selector not found: " + f.selector });
+        results.push({ label: f.label, ok: false, error: "selector not found: " + f.selector + " (tried entry/aria fallbacks)" });
         continue;
       }
       if (f.field_type === "checkbox") {
         if (Boolean(f.value) !== el.checked) el.click();
       } else if (f.field_type === "select") {
+        const targetVal = String(f.value).trim();
+        // Native <select>
         const options = Array.from(el.options || []);
-        const match = options.find((o) => o.value === f.value || o.text.trim() === String(f.value).trim());
-        if (!match) {
-          results.push({ label: f.label, ok: false, error: "no matching option for " + f.value });
-          continue;
+        if (options.length) {
+          const match = options.find((o) => o.value === targetVal || o.text.trim() === targetVal);
+          if (match) { el.value = match.value; el.dispatchEvent(new Event("change", { bubbles: true })); results.push({ label: f.label, ok: true }); continue; }
         }
-        el.value = match.value;
-        el.dispatchEvent(new Event("change", { bubbles: true }));
+        // Google Forms radio: div[role=radio][data-value] inside same listitem
+        const scope = el.closest('[role="listitem"]') || el.closest('[data-params]')?.closest('[role="listitem"]') || document;
+        // Try holder lookup for this entry (numeric without entry. prefix for Google Forms)
+        let holder = null;
+        if (f.selector && /entry\.(\d+)/.test(f.selector)) {
+          const num = f.selector.match(/entry\.(\d+)/)[1];
+          holder = document.querySelector('[data-params*="' + num + '"]');
+        }
+        // fallback by label -> find listitem whose heading matches label
+        if (!holder) {
+          const lab = (f.label||"").trim();
+          if (lab) for (const li of document.querySelectorAll('[role="listitem"]')) {
+            const h = li.querySelector('[role="heading"]');
+            if (h && h.textContent.trim() === lab) { holder = li; break; }
+          }
+        }
+        const searchRoot = holder ? (holder.closest ? (holder.closest('[role="listitem"]')||holder) : holder) : scope;
+        const norm = (s) => s.replace(/\s+/g,' ').trim().toLowerCase();
+        const want = norm(targetVal);
+        // radio
+        let radio = [...searchRoot.querySelectorAll('[role="radio"][data-value]')].find(r => norm(r.getAttribute('data-value')||r.getAttribute('aria-label')||r.textContent) === want || norm(r.textContent).includes(want));
+        if (radio) { radio.click(); results.push({ label: f.label, ok: true }); continue; }
+        // listbox option
+        let opt = [...searchRoot.querySelectorAll('[role="option"]')].find(o => norm(o.textContent) === want || norm(o.getAttribute('data-value')||'') === want);
+        if (opt) { opt.click(); results.push({ label: f.label, ok: true }); continue; }
+        // fallback: any span containing text
+        let span = [...searchRoot.querySelectorAll('span')].find(s => norm(s.textContent) === want);
+        if (span) { (span.closest('label')||span).click(); results.push({ label: f.label, ok: true }); continue; }
+        results.push({ label: f.label, ok: false, error: "no matching option for " + f.value + " (searched radio/option in listitem)" });
+        continue;
       } else {
-        el.value = f.value;
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        el.dispatchEvent(new Event("change", { bubbles: true }));
+        // For Google Forms radio mistakenly typed as text, try radio path first
+        if (f.field_type === "text" || f.field_type === "textarea") {
+          let holder = null;
+          if (f.selector && /entry\.(\d+)/.test(f.selector)) {
+            const num = f.selector.match(/entry\.(\d+)/)[1];
+            holder = document.querySelector('[data-params*="' + num + '"]');
+          }
+          if (holder) {
+            const li = holder.closest('[role="listitem"]');
+            if (li && li.querySelector('[role="radio"]')) {
+              // This is actually a radio field mis-typed — delegate to radio click
+              const norm = (s) => s.replace(/\s+/g,' ').trim().toLowerCase();
+              const want = norm(String(f.value));
+              const radio = [...li.querySelectorAll('[role="radio"][data-value]')].find(r => norm(r.getAttribute('data-value')||'') === want || norm(r.textContent).includes(want));
+              if (radio) { radio.click(); results.push({ label: f.label, ok: true }); continue; }
+            }
+          }
+        }
+        fillTextEl(el, String(f.value));
       }
       results.push({ label: f.label, ok: true });
     } catch (e) {

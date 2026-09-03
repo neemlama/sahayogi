@@ -18,4 +18,11 @@ Thumbs.db
 cdk.out/
 infra/seed-data/audit-log.local.jsonl
 infra/seed-data/sessions.local/
-screenshots/
+infra/seed-data/profile.local.json
+# Keep docs + selected screenshots for Devpost submission (judges need to see them)
+!docs/
+!docs/*.png
+!docs/*.mmd
+!docs/*.md
+!screenshots/
+!screenshots/*.png

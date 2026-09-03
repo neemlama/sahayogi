@@ -38,6 +38,7 @@ from strands import Agent
 
 from agent.orchestrator import build_agent
 from agent.tools.audit_log import read_local_entries
+from agent.tools.profile_store import load_profile, profile_as_text, save_profile
 from agent.tools.proposal import record_extension_fill_result, resume_after_approval
 from agent.tools.session_store import get_session
 
@@ -78,7 +79,10 @@ class ChatResponse(BaseModel):
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(req: ChatRequest) -> ChatResponse:
     agent = _get_agent(req.session_id)
-    prompt = f"session_id: {req.session_id}\n\n{req.message}"
+    # Inject cross-session saved profile so future forms auto-fill without re-asking
+    saved = load_profile("default")
+    profile_block = f"\n\nSAVED_PROFILE:\n{profile_as_text(saved)}" if saved else ""
+    prompt = f"session_id: {req.session_id}{profile_block}\n\n{req.message}"
     if req.page_html:
         # Marker string the orchestrator's system prompt is instructed to
         # look for -- selects inspect_provided_html + fill_mode="extension"
@@ -86,6 +90,22 @@ def chat(req: ChatRequest) -> ChatResponse:
         prompt += f"\n\nPAGE_HTML_PROVIDED: (url: {req.page_url or 'unknown'})\n{req.page_html}"
     result = agent(prompt)
     return ChatResponse(reply=str(result))
+
+
+# --- profile endpoints (cross-session memory, zero AWS cost local) ---
+class ProfileRequest(BaseModel):
+    profile: dict[str, Any]
+
+
+@app.get("/api/profile")
+def get_profile() -> dict[str, Any]:
+    return {"profile": load_profile("default")}
+
+
+@app.post("/api/profile")
+def set_profile(req: ProfileRequest) -> dict[str, Any]:
+    save_profile(req.profile, "default")
+    return {"profile": load_profile("default")}
 
 
 @app.get("/api/session/{session_id}")

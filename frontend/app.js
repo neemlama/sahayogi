@@ -14,6 +14,59 @@ function getSessionId() {
 
 const sessionId = getSessionId();
 
+const PROFILE_KEY = "formbuddy_profile";
+function getProfile() { return localStorage.getItem(PROFILE_KEY) || ""; }
+function setProfile(v) { localStorage.setItem(PROFILE_KEY, v); }
+
+async function syncProfileFromServer() {
+  try {
+    const r = await fetch("/api/profile");
+    if (!r.ok) return;
+    const data = await r.json();
+    const prof = data.profile || {};
+    if (!Object.keys(prof).length) return;
+    const text = Object.entries(prof).map(([k,v])=>`${k}: ${v}`).join("\n");
+    if (!getProfile().trim()) { // only auto-fill vault if empty, don't overwrite user's vault
+      profileText.value = text;
+      setProfile(text);
+    }
+  } catch {}
+}
+async function pushProfileToServer() {
+  const raw = getProfile();
+  if (!raw.trim()) return;
+  const obj = {};
+  raw.split("\n").forEach(line=>{
+    const idx=line.indexOf(":");
+    if(idx>-1) obj[line.slice(0,idx).trim()] = line.slice(idx+1).trim();
+  });
+  try { await fetch("/api/profile",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({profile:obj})}); } catch {}
+}
+
+// profile vault UI
+const profileText = document.getElementById("profile-text");
+const profileBody = document.getElementById("profile-body");
+const profileToggle = document.getElementById("profile-toggle");
+const profileToggleIcon = document.getElementById("profile-toggle-icon");
+const profileSaveBtn = document.getElementById("profile-save");
+const profileClearBtn = document.getElementById("profile-clear");
+const profileSavedNote = document.getElementById("profile-saved-note");
+if (profileText) profileText.value = getProfile();
+if (profileToggle) profileToggle.addEventListener("click", () => {
+  profileBody.hidden = !profileBody.hidden;
+  profileToggleIcon.textContent = profileBody.hidden ? "▸" : "▾";
+});
+if (profileSaveBtn) profileSaveBtn.addEventListener("click", async () => {
+  setProfile(profileText.value);
+  await pushProfileToServer();
+  profileSavedNote.hidden = false;
+  setTimeout(() => profileSavedNote.hidden = true, 1500);
+});
+if (profileClearBtn) profileClearBtn.addEventListener("click", async () => {
+  profileText.value = ""; setProfile("");
+  try { await fetch("/api/profile",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({profile:{}})}); } catch {}
+});
+
 const messagesEl = document.getElementById("messages");
 const formEl = document.getElementById("chat-form");
 const inputEl = document.getElementById("chat-input");
@@ -36,7 +89,16 @@ function addMessage(text, role) {
 }
 
 async function sendChat(message) {
-  addMessage(message, "user");
+  // if user just hit send with empty input but has a saved profile, use it
+  const profile = getProfile();
+  let fullMessage = message;
+  if (profile && !message.toLowerCase().includes("my name is") && !message.toLowerCase().includes("email")) {
+    // only auto-append if message looks like just a URL or short ask
+    if (message.trim().split(/\s+/).length <= 8 || /https?:\/\//.test(message)) {
+      fullMessage = message + (message.trim() ? "\n\n" : "") + "Here's what you know about me:\n" + profile;
+    }
+  }
+  addMessage(message || "(using saved profile)", "user");
   inputEl.value = "";
   formEl.querySelector("button").disabled = true;
   const thinking = addMessage("FormBuddy is thinking...", "thinking");
@@ -45,11 +107,27 @@ async function sendChat(message) {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionId, message }),
+      body: JSON.stringify({ session_id: sessionId, message: fullMessage }),
     });
     const data = await res.json();
     thinking.remove();
-    addMessage(data.reply, "agent");
+    const replyDiv = addMessage(data.reply, "agent");
+    // If backend says session already decided, surface a clear hint to use New Conversation
+    if (/already resolved|already decided|create a new session|new session_id/i.test(data.reply)) {
+      const hint = document.createElement("div");
+      hint.className = "msg agent";
+      hint.style.background = "#fffbeb";
+      hint.style.border = "1px solid #fcd34d";
+      hint.style.fontSize = "13px";
+      hint.textContent = "Tip: Click 🔄 New Conversation (top-right) to start a fresh session — the old one is closed and cannot be reused (see agent/tools/proposal.py:74). Your vault profile is kept.";
+      messagesEl.appendChild(hint);
+    }
+    // If reply asks for missing required fields, highlight them in the input placeholder
+    const missingMatch = data.reply.match(/required fields[^\n:]*:\s*\[([^\]]+)\]/i) || data.reply.match(/missing[^:]*:\s*([^\n]+)/i);
+    if (missingMatch) {
+      inputEl.placeholder = "Missing: " + missingMatch[1].slice(0, 80) + " — type them and press Send";
+      inputEl.focus();
+    }
   } catch (err) {
     thinking.remove();
     addMessage("Something went wrong reaching FormBuddy: " + err, "agent");
@@ -57,6 +135,7 @@ async function sendChat(message) {
     formEl.querySelector("button").disabled = false;
     refreshSession();
     refreshActivity();
+    syncProfileFromServer(); // pull cross-session memory saved via remember_user_details
   }
 }
 
@@ -73,9 +152,11 @@ function fieldRow(label, value) {
 function renderProposalBody(proposal) {
   const fieldRows = (proposal.fields || [])
     .map((f) => {
-      const value = f.value === null || f.value === undefined || f.value === "" ? "<em>(empty)</em>" : escapeHtml(String(f.value));
+      const empty = f.value === null || f.value === undefined || f.value === "";
+      const value = empty ? "<em>(empty)</em>" : escapeHtml(String(f.value));
       const reqTag = f.required ? ' <span style="color:#b45309;">*</span>' : "";
-      return `<tr><td>${escapeHtml(f.label)}${reqTag}</td><td>${value}</td></tr>`;
+      const rowStyle = empty && f.required ? ' style="background:#fffbeb;" title="Required — ask, don\'t invent"' : "";
+      return `<tr${rowStyle}><td>${escapeHtml(f.label)}${reqTag}</td><td>${value}</td></tr>`;
     })
     .join("");
 
@@ -204,8 +285,9 @@ document.getElementById("new-session-btn").addEventListener("click", () => {
 
 // Initial load: greet + sync any existing session state (e.g. after a page refresh).
 addMessage(
-  "Hi! Give me a link to a form you need filled out (an RSVP, a signup, an application) and tell me about yourself, and I'll read the actual form, draft what I'd submit, and wait for your approval before doing anything.",
+  "Namaste! I'm FormBuddy (Good Neighbor). Give me a link to a ward letter, scholarship, or community form and I'll read the real form, draft exactly what I'd submit from your saved profile, and wait for your approval before anything is sent. I ask one missing detail at a time like ChatGPT and remember it for next time. For cooperatives: paste the form URL once, it helps everyone in the batch.",
   "agent"
 );
 refreshSession();
 refreshActivity();
+syncProfileFromServer();
