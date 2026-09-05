@@ -30,14 +30,16 @@ from typing import Any, Literal
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from strands import Agent
 
 from agent.orchestrator import build_agent
 from agent.tools.audit_log import read_local_entries
+from agent.tools.file_store import delete_file, get_file_bytes, get_file_path, list_files, save_file
 from agent.tools.profile_store import load_profile, profile_as_text, save_profile
 from agent.tools.proposal import record_extension_fill_result, resume_after_approval
 from agent.tools.session_store import get_session
@@ -82,7 +84,13 @@ def chat(req: ChatRequest) -> ChatResponse:
     # Inject cross-session saved profile so future forms auto-fill without re-asking
     saved = load_profile("default")
     profile_block = f"\n\nSAVED_PROFILE:\n{profile_as_text(saved)}" if saved else ""
-    prompt = f"session_id: {req.session_id}{profile_block}\n\n{req.message}"
+    # Inject vault file list so orchestrator can auto-match file uploads without asking
+    vault = list_files()
+    vault_block = ""
+    if vault:
+        vault_lines = [f"{m['stored_as']} ({m['mime']}, {m['size']} bytes)" for m in vault[:20]]
+        vault_block = "\n\nFILE_VAULT:\n" + "\n".join(vault_lines) + "\n(Use stored_as as value for file fields when label matches; e.g. 'Citizenship Photo' -> citizenship.jpg if present)"
+    prompt = f"session_id: {req.session_id}{profile_block}{vault_block}\n\n{req.message}"
     if req.page_html:
         # Marker string the orchestrator's system prompt is instructed to
         # look for -- selects inspect_provided_html + fill_mode="extension"
@@ -132,6 +140,42 @@ def decide(session_id: str, req: DecisionRequest) -> dict[str, Any]:
 
     session = get_session(session_id)
     return {"message": message, "status": session["status"] if session else "unknown"}
+
+
+# --- file vault (auto-upload support) ---
+@app.post("/api/files/upload")
+async def upload_file(file: UploadFile = File(...)) -> dict[str, Any]:
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(data) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large (max 10MB)")
+    meta = save_file(data, file.filename or "upload.bin", file.content_type)
+    return meta
+
+@app.get("/api/files")
+def list_vault_files() -> list[dict[str, Any]]:
+    return list_files()
+
+@app.get("/api/files/{stored_as}")
+def download_file(stored_as: str):
+    result = get_file_bytes(stored_as)
+    if result is None:
+        raise HTTPException(status_code=404, detail="File not found")
+    data, mime = result
+    # Prefer FileResponse for local disk (efficient), fallback to streaming for S3 bytes
+    path = get_file_path(stored_as)
+    if path is not None:
+        return FileResponse(path, media_type=mime, filename=stored_as)
+    from fastapi.responses import Response
+    return Response(content=data, media_type=mime, headers={"Content-Disposition": f'inline; filename="{stored_as}"'})
+
+@app.delete("/api/files/{stored_as}")
+def remove_file(stored_as: str) -> dict[str, Any]:
+    ok = delete_file(stored_as)
+    if not ok:
+        raise HTTPException(status_code=404, detail="File not found")
+    return {"deleted": stored_as}
 
 
 @app.get("/api/session/{session_id}/audit")

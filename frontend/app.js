@@ -67,6 +67,51 @@ if (profileClearBtn) profileClearBtn.addEventListener("click", async () => {
   try { await fetch("/api/profile",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({profile:{}})}); } catch {}
 });
 
+// file vault UI
+const fileInput = document.getElementById("file-input");
+const fileUploadBtn = document.getElementById("file-upload");
+const fileList = document.getElementById("file-list");
+const fileToggle = document.getElementById("file-toggle");
+const fileBody = document.getElementById("file-body");
+const fileToggleIcon = document.getElementById("file-toggle-icon");
+const fileUploadNote = document.getElementById("file-upload-note");
+if (fileToggle) fileToggle.addEventListener("click", () => {
+  fileBody.hidden = !fileBody.hidden;
+  fileToggleIcon.textContent = fileBody.hidden ? "▸" : "▾";
+  if (!fileBody.hidden) refreshFileList();
+});
+async function refreshFileList(){
+  try{
+    const r=await fetch("/api/files");
+    if(!r.ok) return;
+    const files=await r.json();
+    if(!files.length){ fileList.innerHTML='<span class="hint">No files yet — upload your citizenship/photo (max 10MB).</span>'; return;}
+    fileList.innerHTML = files.map(f=> `<div style="display:flex; gap:8px; align-items:center; padding:6px; border:1px solid var(--border); border-radius:6px; margin-top:6px; background:white;">
+      <span style="flex:1; overflow:hidden; text-overflow:ellipsis;"><b>${escapeHtml(f.filename)}</b><br><span class="hint">${escapeHtml(f.stored_as)} · ${(f.size/1024).toFixed(1)}KB · ${escapeHtml(f.mime)}</span></span>
+      <a href="/api/files/${encodeURIComponent(f.stored_as)}" target="_blank" class="btn secondary small" style="padding:4px 8px; text-decoration:none;">View</a>
+      <button data-del="${escapeHtml(f.stored_as)}" class="btn secondary small file-del" style="color:#991b1b; border-color:#fca5a5;">Delete</button>
+    </div>`).join("");
+    fileList.querySelectorAll(".file-del").forEach(b=> b.addEventListener("click", async ()=>{
+      if(!confirm("Delete "+b.dataset.del+"?")) return;
+      await fetch("/api/files/"+encodeURIComponent(b.dataset.del),{method:"DELETE"});
+      refreshFileList();
+    }));
+  }catch{}
+}
+if (fileUploadBtn) fileUploadBtn.addEventListener("click", async ()=>{
+  if(!fileInput.files.length){ fileUploadNote.hidden=false; fileUploadNote.textContent="Choose files first."; setTimeout(()=>fileUploadNote.hidden=true,2000); return;}
+  fileUploadBtn.disabled=true; fileUploadNote.hidden=false; fileUploadNote.textContent="Uploading...";
+  for(const f of fileInput.files){
+    const fd=new FormData(); fd.append("file", f);
+    try{ const r=await fetch("/api/files/upload",{method:"POST", body: fd}); if(!r.ok){ fileUploadNote.textContent="Failed "+f.name+": "+(await r.text()).slice(0,120);} else fileUploadNote.textContent="Uploaded "+f.name+" ✅";}
+    catch(e){ fileUploadNote.textContent="Error "+e; }
+  }
+  fileInput.value=""; fileUploadBtn.disabled=false;
+  setTimeout(()=>fileUploadNote.hidden=true,2500);
+  refreshFileList();
+});
+refreshFileList();
+
 const messagesEl = document.getElementById("messages");
 const formEl = document.getElementById("chat-form");
 const inputEl = document.getElementById("chat-input");

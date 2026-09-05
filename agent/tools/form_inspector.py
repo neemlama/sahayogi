@@ -42,20 +42,30 @@ from strands import Agent, tool
 _FIELD_SCHEMA_INSTRUCTIONS = """\
 For every field, determine:
   - label: the human-readable label (from an associated <label>, aria-label, \
-    placeholder, or nearby text -- best guess if ambiguous)
-  - field_type: one of "text", "email", "tel", "number", "date", \
-    "textarea", "select", "checkbox"
+    placeholder, or nearby text -- best guess if ambiguous). For grid questions, \
+    include row label: e.g. "Food quality (Rate 1-5)" or "Availability [Monday]".
+  - field_type: one of "text", "email", "tel", "number", "date", "time", \
+    "textarea", "select", "radio", "checkbox", "file", "rating", "linear_scale", "grid_radio", "grid_checkbox"
+    * text/email/tel/number/textarea = short answer / paragraph / typed inputs
+    * select = dropdown (Google Forms: div[role=listbox] / div[role=option])
+    * radio = multiple-choice single-select (Google Forms: div[role=radio][data-value])
+    * checkbox = multiple-select (Google Forms: div[role=checkbox][data-value])
+    * file = file upload (Google Forms: input[type=file] or "Add file" button inside listitem with data-params)
+    * date = date picker (Google Forms: input[type=date] or 3 inputs + placeholder MM DD YYYY)
+    * time = time picker (Google Forms: hour/minute inputs + AM/PM select, or input[type=time])
+    * rating / linear_scale = linear scale 1-5 etc. (Google Forms: row of div[role=radio] with numeric data-value)
+    * grid_radio / grid_checkbox = multiple-choice / checkbox grid (rows x columns, each cell is radio/checkbox)
   - selector: a CSS selector you could use to target this exact element -- \
     strongly prefer "#id" if the element has an id, otherwise a \
-    name= attribute selector, otherwise the most specific selector you can \
-    construct
-  - options: for "select" fields, the list of visible option text values; \
-    null for everything else
+    name= attribute selector '[name="entry.XXXXXXX"]' for Google Forms, otherwise the most specific selector you can \
+    construct. For grid, return the row's selector; the filler will select the column value.
+  - options: for "select", "radio", "checkbox", "rating", "linear_scale", "grid_radio", "grid_checkbox" fields, the list of visible option text values (for grid: column headers); \
+    null for everything else (text/date/time/file)
   - required: true if the element has a required attribute or is visually/\
-    textually marked required (e.g. an asterisk)
+    textually marked required (e.g. an asterisk, or aria-required=true on Google Forms listitem)
 
 Also identify submit_selector: a CSS selector for the form's submit \
-button.
+button (Google Forms: div[role=button][jsname] with text "Submit" / "Send").
 
 Respond with ONLY a single JSON object, no prose, no markdown fence:
 {"ok": true|false, "fields": [{"label": "...", "field_type": "...", \
@@ -72,6 +82,16 @@ You are inspecting a web form, not filling it out. Navigate to the given \
 URL (use init_session first, then navigate), then use get_html to read the \
 page's HTML source. Find the first <form> on the page (or the most \
 prominent set of input fields if there's no explicit <form> tag).
+Every div[role=listitem] on Google Forms is one question — count them all, even if 15+.
+
+Google Forms type mapping (same as HTML inspector):
+- div[role=radio][data-value] → radio (if numeric 1-5 with scale/rate label → linear_scale/rating)
+- div[role=checkbox][data-value] → checkbox
+- div[role=listbox]+div[role=option] → select (dropdown)
+- input[type=file] / "Add file" → file
+- date: MM DD YYYY placeholder or input[type=date] → date
+- time: HH : MM + AM/PM → time
+- table with radio/checkbox cells → grid_radio / grid_checkbox (one field per row)
 
 {_FIELD_SCHEMA_INSTRUCTIONS}
 (For this cloud path, "no usable form" also covers: login required, \
@@ -84,13 +104,23 @@ you — it was read directly from the user's own open browser tab by a \
 Chrome extension and handed to you as text. Do not attempt to navigate \
 anywhere; just read the given HTML. Find the first <form> in it (or the \
 most prominent set of input fields if there's no explicit <form> tag).
+Every div[role=listitem] on Google Forms is one question — count them all, even if 15+.
 
 Special handling for Google Forms (docs.google.com/forms): the real \
 fields are inputs with name="entry.XXXXXXX" (often inside div[role=listitem]), \
 and the visible textbox may be div[role=textbox] or textarea. Always \
 return selector '[name="entry.XXXXXXX"]' for those (strongly preferred \
-over a generated id), and map the visible question text as label. For \
-selects, the options are div[role=option] text.
+over a generated id), and map the visible question text as label.
+
+Google Forms type mapping (detect via aria + structure, not input type alone):
+- div[role=radio][data-value] inside listitem without grid table → field_type "radio", options = each data-value/text, selector = '[name="entry.XXXX"]' if hidden input exists else listitem selector. If options are numeric 1-5 and label contains "scale"/"rate"/"rating" → use "linear_scale" or "rating".
+- div[role=checkbox][data-value] → "checkbox"
+- div[role=listbox] + div[role=option] → "select" (dropdown)
+- input[type=file] OR div containing "Add file" / "Upload" button + hidden input → "file", options=null
+- Date: look for placeholder "MM DD YYYY" or 3 inputs + year/month/day labels, or input[type=date] → "date"
+- Time: look for "HH : MM" placeholder or hour/minute inputs + AM/PM select, or input[type=time] → "time"
+- Linear scale: single row with radio 1..N (often 1-5, 1-10) → "linear_scale" or "rating"
+- Grid: table with rows as sub-questions and columns as headers, cells contain radio/checkbox → "grid_radio" (if radio) or "grid_checkbox" (if checkbox), options = column headers, label = overall grid title + row label for each row entry (emit one field per row).
 
 {_FIELD_SCHEMA_INSTRUCTIONS}
 """

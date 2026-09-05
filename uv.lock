@@ -551,6 +551,7 @@ dependencies = [
     { name = "nest-asyncio" },
     { name = "pillow" },
     { name = "playwright" },
+    { name = "python-multipart" },
     { name = "strands-agents" },
     { name = "strands-agents-tools" },
 ]
@@ -569,6 +570,7 @@ requires-dist = [
     { name = "nest-asyncio", specifier = ">=1.6.0" },
     { name = "pillow", specifier = ">=12.3.0" },
     { name = "playwright", specifier = ">=1.62.0" },
+    { name = "python-multipart", specifier = ">=0.0.9" },
     { name = "strands-agents", specifier = ">=1.51.0" },
     { name = "strands-agents-tools", specifier = ">=0.8.6" },
 ]

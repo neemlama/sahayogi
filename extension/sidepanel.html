@@ -24,6 +24,17 @@
   </div>
 </section>
 
+<section id="file-section" class="panel">
+  <button id="file-toggle" class="section-toggle" type="button">📎 Document Vault — auto-upload <span id="file-toggle-icon">▸</span></button>
+  <div id="file-body" hidden>
+    <p class="hint">Upload once to the vault — FormBuddy auto-attaches to file fields (no manual Add file). Images/PDFs stored in vault DB.</p>
+    <input type="file" id="file-input" multiple accept="image/*,.pdf,.doc,.docx" />
+    <button id="file-upload" class="btn primary small" type="button">Upload to Vault</button>
+    <span id="file-upload-note" class="hint" hidden></span>
+    <div id="file-list" style="margin-top:8px; font-size:12px;"></div>
+  </div>
+</section>
+
 <section class="panel">
   <button id="analyze-btn" class="btn primary" type="button">🔍 Analyze This Page</button>
   <p class="hint">Reads the form on your currently active tab.</p>

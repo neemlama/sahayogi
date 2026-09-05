@@ -32,6 +32,18 @@
         </div>
       </div>
     </div>
+    <div id="file-vault" class="profile-vault">
+      <button id="file-toggle" class="profile-toggle" type="button">📎 Document Vault — auto-upload <span id="file-toggle-icon">▸</span></button>
+      <div id="file-body" hidden>
+        <p class="hint">Upload your citizenship, SEE marksheet, photo, etc. once — FormBuddy stores them in the vault database and <b>auto-attaches</b> to any file field (no manual "Add file" click). Local disk now, S3 on deploy.</p>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <input type="file" id="file-input" multiple accept="image/*,.pdf,.doc,.docx" />
+          <button id="file-upload" class="btn primary small" type="button">Upload to Vault</button>
+          <span id="file-upload-note" class="hint" hidden></span>
+        </div>
+        <div id="file-list" style="margin-top:10px; font-size:13px;"></div>
+      </div>
+    </div>
     <div id="messages" class="messages" aria-live="polite"></div>
     <form id="chat-form" class="chat-form">
       <input id="chat-input" type="text" placeholder="Paste a form URL and tell me about yourself (or just press Send to use saved profile)..." autocomplete="off" />

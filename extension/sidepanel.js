@@ -65,6 +65,47 @@ $("profile-toggle").addEventListener("click", () => {
   $("profile-toggle-icon").textContent = body.hidden ? "▸" : "▾";
 });
 
+// --- file vault (auto-upload DB) ---
+async function refreshFileList(){
+  try{
+    const r=await fetch(`${BACKEND_URL}/api/files`);
+    if(!r.ok) return;
+    const files=await r.json();
+    const list=$("file-list");
+    if(!files.length){ list.innerHTML='<span class="hint">No files yet — upload citizenship/photo (max 10MB).</span>'; return;}
+    list.innerHTML = files.map(f=> `<div style="display:flex; gap:6px; align-items:center; padding:6px; border:1px solid #e2e8f0; border-radius:6px; margin-top:6px; background:#f8fafc;">
+      <span style="flex:1; overflow:hidden; text-overflow:ellipsis;"><b>${escapeHtml(f.filename)}</b><br><span class="hint">${escapeHtml(f.stored_as)} · ${(f.size/1024).toFixed(1)}KB</span></span>
+      <a href="${BACKEND_URL}/api/files/${encodeURIComponent(f.stored_as)}" target="_blank" style="font-size:11px;">View</a>
+      <button data-del="${escapeHtml(f.stored_as)}" class="file-del" style="font-size:11px; color:#991b1b; border:1px solid #fca5a5; border-radius:4px; background:white; padding:2px 6px;">Delete</button>
+    </div>`).join("");
+    list.querySelectorAll(".file-del").forEach(b=> b.addEventListener("click", async ()=>{
+      if(!confirm("Delete "+b.dataset.del+"?")) return;
+      await fetch(`${BACKEND_URL}/api/files/${encodeURIComponent(b.dataset.del)}`,{method:"DELETE"});
+      refreshFileList();
+    }));
+  }catch{}
+}
+$("file-toggle").addEventListener("click", ()=>{
+  const body=$("file-body");
+  body.hidden=!body.hidden;
+  $("file-toggle-icon").textContent=body.hidden?"▸":"▾";
+  if(!body.hidden) refreshFileList();
+});
+$("file-upload").addEventListener("click", async ()=>{
+  const inp=$("file-input");
+  const note=$("file-upload-note");
+  if(!inp.files.length){ note.hidden=false; note.textContent="Choose files first."; setTimeout(()=>note.hidden=true,2000); return;}
+  note.hidden=false; note.textContent="Uploading...";
+  $("file-upload").disabled=true;
+  for(const f of inp.files){
+    const fd=new FormData(); fd.append("file", f);
+    try{ const r=await fetch(`${BACKEND_URL}/api/files/upload`,{method:"POST", body: fd}); note.textContent= r.ok ? "Uploaded "+f.name+" ✅" : "Failed "+f.name; }catch(e){ note.textContent="Error "+e; }
+  }
+  inp.value=""; $("file-upload").disabled=false;
+  setTimeout(()=>note.hidden=true,2500);
+  refreshFileList();
+});
+
 // --- messaging helpers ---
 function addMessage(text, role) {
   const container = $("messages");
@@ -223,32 +264,62 @@ $("authorize-btn").addEventListener("click", async () => {
       return;
     }
 
-    const results = await fillFieldsOnTab(lastKnownFields);
+    // Enrich file fields with vault bytes so background can auto-attach via DataTransfer
+    const fieldsForFill = await Promise.all(lastKnownFields.map(async f=>{
+      if(f.field_type==='file' && f.value){
+        try{
+          const r=await fetch(`${BACKEND_URL}/api/files/${encodeURIComponent(f.value)}`);
+          if(!r.ok) return f; // not in vault -> background will show manual prompt
+          const blob=await r.blob();
+          const b64=await new Promise((res,rej)=>{
+            const reader=new FileReader();
+            reader.onload=()=> res(reader.result.split(',')[1]);
+            reader.onerror=rej;
+            reader.readAsDataURL(blob);
+          });
+          return {...f, file_b64: b64, file_name: f.value, file_mime: blob.type || 'application/octet-stream'};
+        }catch{ return f; }
+      }
+      return f;
+    }));
+    const results = await fillFieldsOnTab(fieldsForFill);
     thinking.remove();
 
     const filled = results.filter((r) => r.ok && !r.skipped).length;
     const skipped = results.filter((r) => r.skipped).length;
     const failed = results.filter((r) => !r.ok);
+    const manualFiles = results.filter((r) => r.manual_file);
+    const autoFiles = results.filter((r) => r.auto_file);
     const allOk = failed.length === 0;
 
-    const notes = failed.length
+    let notes = failed.length
       ? "Failed fields: " + failed.map((f) => `${f.label} (${f.error})`).join("; ")
       : `${filled} filled, ${skipped} left empty (no data)`;
+    if (manualFiles.length) {
+      const mf = manualFiles.map((f)=> f.warning || (f.label + " needs manual Add file")).join("; ");
+      notes += (notes ? " | " : "") + "Manual file step: " + mf;
+    }
+    if (autoFiles.length) {
+      const af = autoFiles.map(f=> f.warning || f.label).join("; ");
+      notes += (notes ? " | " : "") + "Auto-attached: " + af;
+    }
 
     await fetch(`${BACKEND_URL}/api/session/${encodeURIComponent(sessionId)}/extension-result`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ok: allOk,
-        confirmation_text: `${filled}/${lastKnownFields.length} fields filled`,
+        confirmation_text: `${filled}/${lastKnownFields.length} fields filled` + (autoFiles.length ? ` (${autoFiles.length} file(s) auto-attached)` : "") + (manualFiles.length ? ` (${manualFiles.length} manual)` : ""),
         notes,
       }),
     });
 
     if (allOk) {
+      const extraAuto = autoFiles.length ? `\n\n📎 ${autoFiles.length} file(s) auto-attached from vault: ${autoFiles.map(f=>f.label).join(", ")} — check the form shows them, then click Submit.` : "";
+      const extraManual = manualFiles.length ? `\n\n⚠️ ${manualFiles.length} file field(s) highlighted in orange — vault file not found, please click "Add file" and pick: ${manualFiles.map(f=>f.label+": "+(lastKnownFields.find(x=>x.label===f.label)?.value||"")).join(", ")}. Upload to vault next time for auto-attach.` : "";
       showResult(
         true,
-        `✅ ${filled} field(s) filled in your tab. Nothing was submitted — please review the form and click Submit yourself when ready.`
+        `✅ ${filled} field(s) filled in your tab. Nothing was submitted — please review the form and click Submit yourself when ready.` + extraAuto + extraManual
       );
     } else {
       showResult(false, `⚠️ Some fields could not be filled: ${notes}`);
@@ -280,4 +351,5 @@ $("new-session-btn").addEventListener("click", async () => {
 (async () => {
   sessionId = await getSessionId();
   await loadProfile();
+  refreshFileList();
 })();

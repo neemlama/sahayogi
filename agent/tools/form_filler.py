@@ -52,15 +52,22 @@ def _build_task_prompt(url: str, fields: list[dict[str, Any]], submit_selector: 
     lines = [
         f"Use the browser tool. First call init_session, then navigate to {url}.",
         "",
-        "Fill in the following fields, in order. For text/email/tel/number/date "
-        "fields, use the type action on the given selector. For select fields, "
-        "use evaluate to set the element's value and dispatch a change event if "
-        "clicking the option text doesn't work. For checkbox fields, use the "
-        "click action only if the value is true.",
+        "Fill in the following fields, in order. Be precise about field_type:",
+        "  - text/email/tel/number/textarea: use the type action on the given selector. For Google Forms div[role=textbox], type into it or use evaluate to set textContent and dispatch input+change.",
+        "  - date: if input[type=date] exists, type YYYY-MM-DD; if Google Forms shows 3 inputs (Month/Day/Year), type month into first, day into second, year into third (parse value like 2026-09-03 or 9/3/2026 accordingly).",
+        "  - time: if input[type=time] exists, type HH:MM (24h, e.g. 11am -> 11:00, 3:30 pm -> 15:30); if Google Forms shows hour/minute + AM/PM dropdown, type hour into first input, minute into second, then click the AM/PM listbox option.",
+        "  - select/radio/rating/linear_scale: click the matching option where data-value or visible text equals the value (case-insensitive). For Google Forms, search inside the same [role=listitem] for [role=radio][data-value] or [role=option]. For linear_scale/rating numeric (e.g. 4), click the radio whose data-value is that number.",
+        "  - checkbox/grid_checkbox: for each value (comma-separated if multiple), click the matching [role=checkbox][data-value] so aria-checked becomes true. For grid, each field is one row; value is the column header to select in that row.",
+        "  - grid_radio: one radio per row; value is column to select; find row container then click its matching radio.",
+        "  - file: file uploads cannot be set to a local path via automation due to browser security. Click the 'Add file' / upload button to open the picker, then note in your final JSON that file upload requires manual user action - do not claim success if no file was attached.",
+        "  - For any Google Forms field, the selector may be [name=\"entry.XXXXXXX\"] pointing to a hidden input - fall back to finding the visible widget inside the same [role=listitem] via data-params containing the entry number.",
+        "",
+        "If a selector is not found, search by the label text inside [role=listitem] as fallback before reporting failure.",
         "",
     ]
     for f in fields:
-        lines.append(f"  - {f['field_type']} field, selector \"{f['selector']}\" (label: {f['label']!r}) = {f['value']!r}")
+        opts = f" options={f.get('options')!r}" if f.get("options") else ""
+        lines.append(f"  - {f['field_type']} field, selector \"{f['selector']}\" (label: {f['label']!r}{opts}) = {f['value']!r}")
 
     submit_line = (
         f'After all fields are filled, click the submit button (selector: "{submit_selector}") to submit the form.'

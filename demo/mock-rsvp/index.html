@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <title>Kathmandu Tech Meetup — RSVP (FormBuddy Demo)</title>
-<style>
+  <style>
   :root { --blue: #1d4ed8; --bg: #f8fafc; --border: #d6dde3; }
   * { box-sizing: border-box; }
   body { margin: 0; font-family: "Segoe UI", Arial, sans-serif; background: var(--bg); color: #0f172a; }
@@ -13,13 +13,21 @@
   header { background: var(--blue); color: white; padding: 22px 24px; }
   header h1 { margin: 0; font-size: 22px; }
   header p { margin: 6px 0 0; font-size: 14px; opacity: 0.9; }
-  main { max-width: 560px; margin: 24px auto; background: white; border: 1px solid var(--border); border-radius: 8px; padding: 26px 30px; }
+  main { max-width: 600px; margin: 24px auto; background: white; border: 1px solid var(--border); border-radius: 8px; padding: 26px 30px; }
   label { display: block; margin-top: 16px; margin-bottom: 4px; font-size: 14px; font-weight: 600; }
-  input[type=text], input[type=email], input[type=tel], input[type=number], select, textarea {
+  input[type=text], input[type=email], input[type=tel], input[type=number], input[type=date], input[type=time], input[type=file], select, textarea {
     width: 100%; padding: 9px 11px; border: 1px solid var(--border); border-radius: 5px; font-size: 14px; font-family: inherit;
   }
   textarea { resize: vertical; min-height: 60px; }
-  .checkbox-row { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 14px; }
+  fieldset { border: 1px solid var(--border); border-radius: 6px; padding: 12px 16px; margin-top: 16px; }
+  fieldset legend { font-size: 14px; font-weight: 600; padding: 0 6px; }
+  .radio-row, .checkbox-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 14px; }
+  .radio-row label, .checkbox-row label { margin: 0; font-weight: 400; }
+  .rating-row { display: flex; gap: 10px; margin-top: 8px; }
+  .rating-row label { display: flex; flex-direction: column; align-items: center; font-size: 13px; cursor: pointer; }
+  .grid-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+  .grid-table th, .grid-table td { border: 1px solid var(--border); padding: 6px; text-align: center; }
+  .grid-table th { background: #f1f5f9; }
   .required { color: #b3261e; }
   button { margin-top: 24px; background: var(--blue); color: white; border: none; padding: 11px 24px; border-radius: 5px; font-size: 15px; cursor: pointer; }
 </style>
@@ -28,7 +36,7 @@
 <div class="demo-banner">⚠️ DEMO FORM — NOT A REAL GOVERNMENT SITE — built for the FormBuddy Good Neighbor demo to test form-filling automation for community services.</div>
 <header>
   <h1>🏘️ Ward Service & Community Registration — Demo</h1>
-  <p>Fictional ward-level community registration (modeled on scholarship/ward-letter fields). Demonstrates text, email, tel, number, select, textarea, checkbox — same fields as real public-service forms.</p>
+  <p>Fictional ward-level community registration covering every real question type: text, email, tel, number, date, time, file upload, radio, checkbox, select, rating/linear-scale, textarea. Trained to mimic Google Forms' "WuEJAhZpGer58v9Y8" exhaustive form — upload img, rating, date, time, etc.</p>
 </header>
 <main>
   <form id="rsvp-form">
@@ -44,6 +52,13 @@
     <label for="guest_count">Number of Guests (including yourself) <span class="required">*</span></label>
     <input type="number" id="guest_count" name="guest_count" min="1" max="10" required />
 
+    <fieldset>
+      <legend>Event Type <span class="required">*</span></legend>
+      <div class="radio-row"><input type="radio" id="ev_workshop" name="event_type" value="Workshop" required /><label for="ev_workshop">Workshop</label></div>
+      <div class="radio-row"><input type="radio" id="ev_seminar" name="event_type" value="Seminar" /><label for="ev_seminar">Seminar</label></div>
+      <div class="radio-row"><input type="radio" id="ev_meetup" name="event_type" value="Community Meetup" /><label for="ev_meetup">Community Meetup</label></div>
+    </fieldset>
+
     <label for="tshirt_size">T-Shirt Size <span class="required">*</span></label>
     <select id="tshirt_size" name="tshirt_size" required>
       <option value="">-- Select --</option>
@@ -52,6 +67,33 @@
       <option value="L">L</option>
       <option value="XL">XL</option>
     </select>
+
+    <label for="event_date">Preferred Event Date <span class="required">*</span></label>
+    <input type="date" id="event_date" name="event_date" required />
+
+    <label for="available_time">What time will you be available? <span class="required">*</span></label>
+    <input type="time" id="available_time" name="available_time" required />
+
+    <label for="id_photo">Upload Citizenship / ID Photo (image)</label>
+    <input type="file" id="id_photo" name="id_photo" accept="image/*" />
+
+    <fieldset>
+      <legend>Skills — select all that apply</legend>
+      <div class="checkbox-row"><input type="checkbox" id="skill_coding" name="skills" value="Coding" /><label for="skill_coding">Coding</label></div>
+      <div class="checkbox-row"><input type="checkbox" id="skill_design" name="skills" value="Design" /><label for="skill_design">Design</label></div>
+      <div class="checkbox-row"><input type="checkbox" id="skill_writing" name="skills" value="Writing" /><label for="skill_writing">Writing</label></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Overall Satisfaction — Rate 1 to 5 <span class="required">*</span></legend>
+      <div class="rating-row">
+        <label><input type="radio" name="satisfaction" value="1" required /> 1</label>
+        <label><input type="radio" name="satisfaction" value="2" /> 2</label>
+        <label><input type="radio" name="satisfaction" value="3" /> 3</label>
+        <label><input type="radio" name="satisfaction" value="4" /> 4</label>
+        <label><input type="radio" name="satisfaction" value="5" /> 5</label>
+      </div>
+    </fieldset>
 
     <label for="dietary">Dietary Restrictions</label>
     <textarea id="dietary" name="dietary" placeholder="e.g. vegetarian, none"></textarea>
