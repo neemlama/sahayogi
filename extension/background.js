@@ -83,6 +83,7 @@ function fillFieldsInPage(fields) {
 
   function fillTextEl(el, value) {
     el.focus && el.focus();
+    try { el.style.outline = '3px solid #10b981'; setTimeout(()=>{ try{el.style.outline='';}catch{} }, 3500); } catch {}
     if (el.getAttribute('role') === 'textbox' || el.getAttribute('contenteditable') === 'true') {
       el.textContent = value;
       el.dispatchEvent(new InputEvent('input', { bubbles: true, data: value }));
@@ -210,6 +211,19 @@ function fillFieldsInPage(fields) {
       }
       // --- DATE ---
       if (f.field_type === 'date') {
+        // Native HTML fast path: selector already points at the input itself
+        // (e.g. mock-rsvp #event_date). Old code searched *inside* the input
+        // for another input, which always fails since inputs have no children.
+        try {
+          const direct = f.selector ? document.querySelector(f.selector) : null;
+          if (direct && (direct.type === 'date' || (direct.tagName === 'INPUT' && direct.getAttribute('type') === 'date'))) {
+            let normDate = strVal;
+            const mdy = strVal.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+            if (mdy) normDate = mdy[3] + '-' + mdy[1].padStart(2,'0') + '-' + mdy[2].padStart(2,'0');
+            fillTextEl(direct, normDate);
+            results.push({ label: f.label, ok: true }); continue;
+          }
+        } catch {}
         let li = getGoogleListItem(f) || findEl(f);
         if (!li) { results.push({ label: f.label, ok: false, error: "date container not found" }); continue; }
         const root = li.closest ? (li.closest('[role="listitem"]')||li) : li;
@@ -248,6 +262,22 @@ function fillFieldsInPage(fields) {
       }
       // --- TIME ---
       if (f.field_type === 'time') {
+        // Native HTML fast path, same reason as date above.
+        try {
+          const direct = f.selector ? document.querySelector(f.selector) : null;
+          if (direct && (direct.type === 'time' || (direct.tagName === 'INPUT' && direct.getAttribute('type') === 'time'))) {
+            let norm = strVal.toLowerCase();
+            let h=0,m=0;
+            let pm = norm.includes('pm');
+            let am = norm.includes('am');
+            let hm = norm.match(/(\d{1,2}):(\d{2})/);
+            if (hm){ h=parseInt(hm[1]); m=parseInt(hm[2]); }
+            else { let hh = norm.match(/(\d{1,2})/); if (hh) h=parseInt(hh[1]); }
+            if (pm && h<12) h+=12; if (am && h===12) h=0;
+            fillTextEl(direct, String(h).padStart(2,'0')+':'+String(m).padStart(2,'0'));
+            results.push({ label: f.label, ok: true }); continue;
+          }
+        } catch {}
         let li = getGoogleListItem(f) || findEl(f);
         if (!li) { results.push({ label: f.label, ok: false, error: "time container not found" }); continue; }
         const root = li.closest ? (li.closest('[role="listitem"]')||li) : li;
@@ -290,6 +320,59 @@ function fillFieldsInPage(fields) {
       // --- RADIO / RATING / LINEAR SCALE / CHECKBOX / SELECT / GRID ---
       if (['select','radio','rating','linear_scale','grid_radio','grid_checkbox','checkbox'].includes(f.field_type)) {
         const el = findEl(f);
+        // Native HTML fast path (mock-rsvp + any plain <form>, not Google Forms).
+        // Google path below searches *inside* a listitem container; for native
+        // forms the selector already IS the input(s), so handle directly.
+        try {
+          const norm = (s) => String(s).replace(/\s+/g,' ').trim().toLowerCase();
+          // 1) <select> directly (e.g. #tshirt_size = M)
+          if (el && el.tagName === 'SELECT') {
+            const want = norm(rawVal);
+            const opts = Array.from(el.options || []);
+            const match = opts.find(o => norm(o.value) === want || norm(o.text) === want);
+            if (match) { el.value = match.value; el.dispatchEvent(new Event('change', { bubbles: true })); results.push({ label: f.label, ok: true }); continue; }
+            // fall through to Google path which will report the real options
+          }
+          // 2) native radio group (e.g. [name="event_type"] = Workshop,
+          //    [name="satisfaction"] = 1). document.querySelector returns only
+          //    the first radio, so expand to the whole group by name.
+          if (el && el.type === 'radio') {
+            const name = el.name || (f.selector && (f.selector.match(/name=["']?([^"'\]]+)/)||[])[1]);
+            const group = name ? Array.from(document.querySelectorAll('input[type="radio"][name="'+name+'"]')) : [el];
+            const vals = Array.isArray(rawVal) ? rawVal : [String(rawVal)];
+            let okAll = true;
+            for (const v of vals) {
+              const hit = group.find(r => norm(r.value) === norm(v) || norm(r.getAttribute('aria-label')||'') === norm(v));
+              if (hit) { if (!hit.checked) hit.click(); }
+              else okAll = false;
+            }
+            if (okAll) { results.push({ label: f.label, ok: true }); continue; }
+            // else fall through to report failure with options below
+          }
+          // 3) native checkbox (single #plus_one or group [name="skills"])
+          if (el && el.type === 'checkbox') {
+            // Single checkbox with boolean false (optional, unchecked) = success, nothing to do.
+            if (rawVal === false || rawVal === null || rawVal === undefined || String(rawVal).trim() === '' || String(rawVal).toLowerCase() === 'false') {
+              if (el.checked) el.click(); // ensure unchecked
+              results.push({ label: f.label, ok: true }); continue;
+            }
+            if (String(rawVal).toLowerCase() === 'true' || String(rawVal).toLowerCase() === 'checked') {
+              if (!el.checked) el.click();
+              results.push({ label: f.label, ok: true }); continue;
+            }
+            // Group by name (skills=Coding): match by value attribute.
+            const name = el.name;
+            const group = name ? Array.from(document.querySelectorAll('input[type="checkbox"][name="'+name+'"]')) : [el];
+            const vals = Array.isArray(rawVal) ? rawVal : String(rawVal).split(',').map(s=>s.trim()).filter(Boolean);
+            let okAll = true;
+            for (const v of vals) {
+              const hit = group.find(c => norm(c.value) === norm(v));
+              if (hit) { if (!hit.checked) hit.click(); }
+              else okAll = false;
+            }
+            if (okAll) { results.push({ label: f.label, ok: true }); continue; }
+          }
+        } catch {}
         let searchRoot = null;
         const li = getGoogleListItem(f);
         if (li) searchRoot = li;
@@ -389,7 +472,23 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           func: fillFieldsInPage,
           args: [msg.fields],
         });
-        sendResponse({ ok: true, results: result });
+        // Independent read-back in the same tab: which document did the
+        // filler actually see? (Catches wrong-frame / stale-DOM cases where
+        // results say ok but the visible page is untouched.)
+        let diag = null;
+        try {
+          const [d] = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: () => ({
+              href: window.location.href,
+              title: document.title,
+              inputs: document.querySelectorAll("input,select,textarea").length,
+              full_name_val: (document.querySelector("#full_name") || {}).value ?? null,
+            }),
+          });
+          diag = d.result;
+        } catch (e) { diag = { diag_error: String(e) }; }
+        sendResponse({ ok: true, results: result, filled_tab_url: tab.url, filled_tab_id: tab.id, diag });
       } catch (e) {
         sendResponse({ ok: false, error: String(e) });
       }

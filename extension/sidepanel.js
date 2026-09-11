@@ -133,7 +133,7 @@ function fillFieldsOnTab(fields) {
     chrome.runtime.sendMessage({ type: "FILL_FIELDS", fields }, (resp) => {
       if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
       if (!resp || !resp.ok) return reject(new Error((resp && resp.error) || "fill failed"));
-      resolve(resp.results);
+      resolve(resp);
     });
   });
 }
@@ -163,6 +163,18 @@ $("analyze-btn").addEventListener("click", async () => {
   $("analyze-btn").disabled = true;
   const thinking = addMessage("Reading the page...", "thinking");
   try {
+    // Auto-rotate: a session ID can only ever propose once (proposal.py
+    // refuses to overwrite submitted/rejected/failed). If the last run
+    // ended terminal, start a fresh ID silently so Analyze just works
+    // instead of the agent replying "already submitted".
+    try {
+      const prev = await fetchSession();
+      if (prev && ["submitted", "rejected", "submission_failed", "approved"].includes(prev.status)) {
+        sessionId = await resetSessionId();
+        $("proposal-section").hidden = true;
+        $("result-section").hidden = true;
+      }
+    } catch {}
     const page = await extractPageFromTab();
     thinking.textContent = "FormBuddy is analyzing the form...";
 
@@ -282,7 +294,13 @@ $("authorize-btn").addEventListener("click", async () => {
       }
       return f;
     }));
-    const results = await fillFieldsOnTab(fieldsForFill);
+    const fillResp = await fillFieldsOnTab(fieldsForFill);
+    const results = fillResp.results || fillResp;
+    const filledTabUrl = fillResp.filled_tab_url || "";
+    const diag = fillResp.diag || null;
+    const diagLine = diag
+      ? `\n\nFiller saw page: ${diag.href || "?"} (${diag.inputs ?? "?"} inputs, #full_name=${JSON.stringify(diag.full_name_val)})`
+      : "";
     thinking.remove();
 
     const filled = results.filter((r) => r.ok && !r.skipped).length;
@@ -303,6 +321,9 @@ $("authorize-btn").addEventListener("click", async () => {
       const af = autoFiles.map(f=> f.warning || f.label).join("; ");
       notes += (notes ? " | " : "") + "Auto-attached: " + af;
     }
+    if (diag) {
+      notes += ` | diag: href=${diag.href || "?"} inputs=${diag.inputs ?? "?"} full_name=${JSON.stringify(diag.full_name_val)}`;
+    }
 
     await fetch(`${BACKEND_URL}/api/session/${encodeURIComponent(sessionId)}/extension-result`, {
       method: "POST",
@@ -319,7 +340,7 @@ $("authorize-btn").addEventListener("click", async () => {
       const extraManual = manualFiles.length ? `\n\n⚠️ ${manualFiles.length} file field(s) highlighted in orange — vault file not found, please click "Add file" and pick: ${manualFiles.map(f=>f.label+": "+(lastKnownFields.find(x=>x.label===f.label)?.value||"")).join(", ")}. Upload to vault next time for auto-attach.` : "";
       showResult(
         true,
-        `✅ ${filled} field(s) filled in your tab. Nothing was submitted — please review the form and click Submit yourself when ready.` + extraAuto + extraManual
+        `✅ ${filled} field(s) filled in your tab. Nothing was submitted — please review the form and click Submit yourself when ready.` + extraAuto + extraManual + (filledTabUrl ? `\n\nFilled tab: ${filledTabUrl} — if this is not the tab you are looking at, switch to it. Fields flash green briefly.` : "") + diagLine
       );
     } else {
       showResult(false, `⚠️ Some fields could not be filled: ${notes}`);
